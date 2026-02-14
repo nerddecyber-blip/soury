@@ -30,20 +30,12 @@ async function createSession(number) {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", async (update) => {
-    const { connection } = update;
-
-    if (connection === "open") {
-      console.log("Connected:", number);
-    }
-  });
-
   const code = await sock.requestPairingCode(number);
   return code;
 }
 
 app.get("/", (req, res) => {
-  res.send("Soury Multi-Session Bot is Running");
+  res.send("Soury Bot is Running ✅");
 });
 
 app.get("/pair/:number", async (req, res) => {
@@ -52,17 +44,20 @@ app.get("/pair/:number", async (req, res) => {
     const code = await createSession(number);
 
     res.json({
-      status: "Pairing code generated",
-      number: number,
-      code: code,
+      success: true,
+      number,
+      code,
     });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Failed to generate pairing code" });
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
