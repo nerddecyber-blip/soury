@@ -1,69 +1,40 @@
-const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-} = require("@whiskeysockets/baileys");
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys"
+import P from "pino"
+import fs from "fs"
 
-const app = express();
-app.use(express.json());
+async function startBot(sessionId = "default") {
+    const sessionPath = `./sessions/${sessionId}`
 
-const sessions = {};
-
-async function startSession(id, res) {
-  const sessionPath = path.join(__dirname, "sessions", id);
-
-  if (!fs.existsSync(sessionPath)) {
-    fs.mkdirSync(sessionPath, { recursive: true });
-  }
-
-  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-
-  const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: false,
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, pairingCode } = update;
-
-    if (pairingCode) {
-      res.json({
-        code: pairingCode,
-      });
+    if (!fs.existsSync(sessionPath)) {
+        fs.mkdirSync(sessionPath, { recursive: true })
     }
 
-    if (connection === "open") {
-      console.log("User connected:", id);
-    }
+    const { state, saveCreds } = await useMultiFileAuthState(sessionPath)
 
-    if (connection === "close") {
-      console.log("User disconnected:", id);
-    }
-  });
+    const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: true,
+        logger: P({ level: "silent" })
+    })
 
-  await sock.requestPairingCode(id);
+    sock.ev.on("creds.update", saveCreds)
+
+    sock.ev.on("connection.update", (update) => {
+        const { connection, lastDisconnect } = update
+
+        if (connection === "close") {
+            const shouldReconnect =
+                lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
+
+            if (shouldReconnect) {
+                startBot(sessionId)
+            }
+        }
+
+        if (connection === "open") {
+            console.log(`Bot connected for session: ${sessionId}`)
+        }
+    })
 }
 
-app.get("/", (req, res) => {
-  res.send("Bot is running");
-});
-
-app.get("/pair/:number", async (req, res) => {
-  const number = req.params.number;
-
-  try {
-    await startSession(number, res);
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Pairing failed" });
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+startBot()
