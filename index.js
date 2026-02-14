@@ -1,40 +1,63 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys"
-import P from "pino"
-import fs from "fs"
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+} = require("@whiskeysockets/baileys");
 
-async function startBot(sessionId = "default") {
-    const sessionPath = `./sessions/${sessionId}`
+const P = require("pino");
+const fs = require("fs");
 
-    if (!fs.existsSync(sessionPath)) {
-        fs.mkdirSync(sessionPath, { recursive: true })
+async function startBot(session) {
+  const { state, saveCreds } = await useMultiFileAuthState(
+    `./sessions/${session}`
+  );
+
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger: P({ level: "silent" }),
+  });
+
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("connection.update", (update) => {
+    const { connection, qr } = update;
+
+    if (qr) {
+      console.log(`Scan QR for session: ${session}`);
     }
 
-    const { state, saveCreds } = await useMultiFileAuthState(sessionPath)
+    if (connection === "open") {
+      console.log(`Bot connected for: ${session}`);
+    }
+  });
 
-    const sock = makeWASocket({
-        auth: state,
-        printQRInTerminal: true,
-        logger: P({ level: "silent" })
-    })
+  sock.ev.on("messages.upsert", async (m) => {
+    const msg = m.messages[0];
+    if (!msg.message) return;
 
-    sock.ev.on("creds.update", saveCreds)
+    const text =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text;
 
-    sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect } = update
+    const from = msg.key.remoteJid;
 
-        if (connection === "close") {
-            const shouldReconnect =
-                lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
-
-            if (shouldReconnect) {
-                startBot(sessionId)
-            }
-        }
-
-        if (connection === "open") {
-            console.log(`Bot connected for session: ${sessionId}`)
-        }
-    })
+    if (text === ".ping") {
+      await sock.sendMessage(from, { text: "Bot is alive!" });
+    }
+  });
 }
 
-startBot()
+function startAllSessions() {
+  if (!fs.existsSync("./sessions")) fs.mkdirSync("./sessions");
+
+  const sessions = fs.readdirSync("./sessions");
+
+  sessions.forEach((session) => {
+    startBot(session);
+  });
+}
+
+startAllSessions();
