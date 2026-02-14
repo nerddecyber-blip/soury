@@ -1,3 +1,4 @@
+const express = require("express");
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -6,12 +7,19 @@ const {
 
 const P = require("pino");
 const fs = require("fs");
+const path = require("path");
 
-async function startBot(session) {
-  const { state, saveCreds } = await useMultiFileAuthState(
-    `./sessions/${session}`
-  );
+const app = express();
+app.use(express.json());
 
+async function createSession(number, res) {
+  const sessionPath = path.join(__dirname, "sessions", number);
+
+  if (!fs.existsSync(sessionPath)) {
+    fs.mkdirSync(sessionPath, { recursive: true });
+  }
+
+  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -22,42 +30,38 @@ async function startBot(session) {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", (update) => {
-    const { connection, qr } = update;
-
-    if (qr) {
-      console.log(`Scan QR for session: ${session}`);
-    }
+  sock.ev.on("connection.update", async (update) => {
+    const { connection } = update;
 
     if (connection === "open") {
-      console.log(`Bot connected for: ${session}`);
+      console.log("Connected:", number);
     }
   });
 
-  sock.ev.on("messages.upsert", async (m) => {
-    const msg = m.messages[0];
-    if (!msg.message) return;
+  const code = await sock.requestPairingCode(number);
 
-    const text =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text;
-
-    const from = msg.key.remoteJid;
-
-    if (text === ".ping") {
-      await sock.sendMessage(from, { text: "Bot is alive!" });
-    }
+  res.json({
+    status: "Pairing code generated",
+    number: number,
+    code: code,
   });
 }
 
-function startAllSessions() {
-  if (!fs.existsSync("./sessions")) fs.mkdirSync("./sessions");
+app.get("/", (req, res) => {
+  res.send("Soury Multi-Session Bot is Running");
+});
 
-  const sessions = fs.readdirSync("./sessions");
+app.get("/pair/:number", async (req, res) => {
+  try {
+    const number = req.params.number;
+    await createSession(number, res);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Failed to generate pairing code" });
+  }
+});
 
-  sessions.forEach((session) => {
-    startBot(session);
-  });
-}
-
-startAllSessions();
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
+});
