@@ -10,25 +10,9 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-app.get("/pair/:number", async (req, res) => {
-    const phoneNumber = req.params.number;
-
-    if (!phoneNumber) {
-        return res.status(400).json({ error: "Phone number required" });
-    }
-
-    try {
-        const code = await createSession(process.env.SESSION_ID || "default", phoneNumber);
-        res.json({ pairing_code: code });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Failed to generate pairing code" });
-    }
-});
-
 app.use(express.json());
 
-async function createSession(number, res) {
+async function createSession(number) {
   const sessionPath = path.join(__dirname, "sessions", number);
 
   if (!fs.existsSync(sessionPath)) {
@@ -55,12 +39,7 @@ async function createSession(number, res) {
   });
 
   const code = await sock.requestPairingCode(number);
-
-  res.json({
-    status: "Pairing code generated",
-    number: number,
-    code: code,
-  });
+  return code;
 }
 
 app.get("/", (req, res) => {
@@ -70,7 +49,13 @@ app.get("/", (req, res) => {
 app.get("/pair/:number", async (req, res) => {
   try {
     const number = req.params.number;
-    await createSession(number, res);
+    const code = await createSession(number);
+
+    res.json({
+      status: "Pairing code generated",
+      number: number,
+      code: code,
+    });
   } catch (err) {
     console.log(err);
     res.status(500).json({ error: "Failed to generate pairing code" });
@@ -81,7 +66,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
-app.listen(process.env.PORT || 3000, () => {
-    console.log("Server running...");
-});
-
